@@ -28,7 +28,7 @@ def run_vader(analyzer, vader_df, start_time):
     vader_df['vaderTextScore'] = vader_df['reviewText'].apply(
         lambda x: analyzer.polarity_scores(x)['compound'] if x is not None else None)
     text_done_time = datetime.datetime.now()
-    print("Done with text in ", text_done_time, start_time)
+    print("Done with text in ", text_done_time - start_time)
     vader_df['vaderSummScore'] = vader_df['summary'].apply(
         lambda x: analyzer.polarity_scores(x)['compound'] if x is not None else None)
     return vader_df
@@ -49,7 +49,7 @@ def flair_prediction(x):
 def run_flair(flair_df, start_time):
     flair_df['flairTextScore'] = flair_df['reviewText'].apply(lambda x: flair_prediction(x) if x is not None else None)
     text_done_time = datetime.datetime.now()
-    print("Done with text in ", text_done_time, start_time)
+    print("Done with text in ", text_done_time - start_time)
     flair_df['flairSummScore'] = flair_df['summary'].apply(lambda x: flair_prediction(x) if x is not None else None)
     return flair_df
 
