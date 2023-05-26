@@ -1,9 +1,7 @@
 import datetime
-
-from nltk.downloader import download
 import numpy as np
 import pandas as pd
-from nltk.sentiment import SentimentIntensityAnalyzer
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.metrics import f1_score
 from sklearn.model_selection import cross_validate
@@ -18,47 +16,43 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import GridSearchCV
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 import pickle
-import torch
-from transformers import pipeline
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoConfig
-from huggingface_hub import hf_hub_download
+from flair.models import TextClassifier
+from flair.data import Sentence
+
+# for the flair helper
+sia = TextClassifier.load('en-sentiment')
 
 
 ### Helper Functions ###
-def run_vader(analyzer, vader_df):
-    text_scores = list(vader_df['reviewText'].apply(lambda x: analyzer.polarity_scores(x)['compound'] if x is not None else None))
-    vader_df.reviewText = text_scores
-    summ_scores = list(vader_df['summary'].apply(lambda x: analyzer.polarity_scores(x)['compound'] if x is not None else None))
-    vader_df.summary = summ_scores
+def run_vader(analyzer, vader_df, start_time):
+    vader_df['vaderTextScore'] = vader_df['reviewText'].apply(
+        lambda x: analyzer.polarity_scores(x)['compound'] if x is not None else None)
+    text_done_time = datetime.datetime.now()
+    print("Done with text in ", text_done_time, start_time)
+    vader_df['vaderSummScore'] = vader_df['summary'].apply(
+        lambda x: analyzer.polarity_scores(x)['compound'] if x is not None else None)
     return vader_df
 
 
-def extract_star(x):
-    return round(int(x['label'][0]) * 0.2, 1)
+def flair_prediction(x):
+    sentence = Sentence(x)
+    sia.predict(sentence)
+    score = sentence.labels[0]
+    if "POSITIVE" in str(score):
+        return 1
+    elif "NEGATIVE" in str(score):
+        return -1
+    else:
+        return 0
 
 
-def run_bert(classifier, bert_df, start_time):
-    rev_none_list = bert_df[bert_df['reviewText'].isnull()].index.to_list()
-    rev_list = list(bert_df['reviewText'].apply(lambda x: x[:512] if x is not None else ""))
-    rev_dict_list = classifier.predict(rev_list)
-    rev_pred_list = list(map(extract_star, rev_dict_list))
+def run_flair(flair_df, start_time):
+    flair_df['flairTextScore'] = flair_df['reviewText'].apply(lambda x: flair_prediction(x) if x is not None else None)
+    text_done_time = datetime.datetime.now()
+    print("Done with text in ", text_done_time, start_time)
+    flair_df['flairSummScore'] = flair_df['summary'].apply(lambda x: flair_prediction(x) if x is not None else None)
+    return flair_df
 
-    bert_df.reviewText = rev_pred_list
-    put_back_null = list(bert_df['reviewText'].apply(lambda x: x if x.index not in rev_none_list else None))
-    bert_df.reviewText = put_back_null
-    end_text_time = datetime.datetime.now()
-    print("Done with text, starting summary")
-    print("Time elapsed: ", end_text_time - start_time)
-
-    summ_none_list = bert_df[bert_df['summary'].isnull()].index.to_list()
-    summ_list = list(bert_df['summary'].apply(lambda x: x[:512] if x is not None else ""))
-    summ_dict_list = classifier.predict(summ_list)
-    summ_pred_list = list(map(extract_star, summ_dict_list))
-
-    bert_df.summary = summ_pred_list
-    put_back_null_summ = list(bert_df['summary'].apply(lambda x: x if x.index not in summ_none_list else None))
-    bert_df.summary = put_back_null_summ
-    return bert_df
 
 def get_age_weight(rev_training, index, first_rev_time):
     return ((0.01) / (365 * 24 * 3600)) * (rev_training.unixReviewTime[index] - first_rev_time) + 1
@@ -126,7 +120,8 @@ def generate_bar_plot(models, model_names, scoring_method, scores_avg, w=0.2, bo
     count = 0
     colors = ['lightseagreen', 'mediumorchid', 'steelblue']
     for method in scoring_method:
-        plt.bar(x_axis + offset + (count * w), method_scores[method], w, color=colors[count], label=method)
+        plt.bar(x_axis + offset + (count * w),
+                method_scores[method], w, color=colors[count], label=method)
         count += 1
     plt.ylim(bottom, top)
     plt.xticks(x_axis, x)
@@ -140,30 +135,31 @@ def generate_bar_plot(models, model_names, scoring_method, scores_avg, w=0.2, bo
 
 
 ### Preprocessing ###
-def preprocess(associations, rev_df, vader_df, bert_df):
+def preprocess(associations, rev_df):
     # index texts, summary, get avg star rating
     product_text_list = []
     vader_product_text_list = []
-    bert_product_text_list = []
+    flair_product_text_list = []
     product_summ_list = []
     vader_product_summ_list = []
-    bert_product_summ_list = []
+    flair_product_summ_list = []
     feature_stars_list = []
     for asin in associations.keys():
         text_list = []
         vader_text_list = []
-        bert_text_list = []
+        flair_text_list = []
         summ_list = []
         vader_summ_list = []
-        bert_summ_list = []
+        flair_summ_list = []
         stars_list = []
-        star_summary = ["One Star", "Two Stars", "Three Stars", "Four Stars", "Five Stars"]
+        star_summary = ["One Star", "Two Stars",
+                        "Three Stars", "Four Stars", "Five Stars"]
         for index in associations[asin]:
             text_list.append(rev_df.reviewText[index])
-            vader_text_list.append(vader_df.reviewText[index])
-            vader_summ_list.append(vader_df.summary[index])
-            bert_text_list.append(bert_df.reviewText[index])
-            bert_summ_list.append(bert_df.summary[index])
+            vader_text_list.append(rev_df.vaderTextScore[index])
+            vader_summ_list.append(rev_df.vaderSummScore[index])
+            flair_text_list.append(rev_df.flairTextScore[index])
+            flair_summ_list.append(rev_df.flairSummScore[index])
 
             if rev_df.summary[index] in star_summary:
                 summ_list.append(None)
@@ -175,11 +171,12 @@ def preprocess(associations, rev_df, vader_df, bert_df):
                 summ_list.append(rev_df.summary[index])
         product_text_list.append(text_list)
         vader_product_text_list.append(vader_text_list)
-        bert_product_text_list.append(bert_text_list)
+        flair_product_text_list.append(flair_text_list)
         product_summ_list.append(summ_list)
         vader_product_summ_list.append(vader_summ_list)
-        bert_product_summ_list.append(bert_summ_list)
-        feature_stars_list.append(round(np.mean(stars_list), 1) if stars_list != [] else 1)
+        flair_product_summ_list.append(flair_summ_list)
+        feature_stars_list.append(
+            round(np.mean(stars_list), 1) if stars_list != [] else 1)
 
     #  Age, Vote, Verification, Image weight, Amount of Reviews, Verification Percentage
     print("Compute remaining features")
@@ -217,7 +214,8 @@ def preprocess(associations, rev_df, vader_df, bert_df):
         product_vote_weight.append(vote_weight)
         product_verification_weight.append(verification_weight)
         product_image_weight.append(image_weight)
-        feature_verification_perc_list.append(round(verification_count / len(associations[asin]), 2))
+        feature_verification_perc_list.append(
+            round(verification_count / len(associations[asin]), 2))
 
     # weighted compound
     feature_avg_vader_text_list = []
@@ -226,22 +224,26 @@ def preprocess(associations, rev_df, vader_df, bert_df):
     feature_std_vader_summ_list = []
 
     # weighted sentiment
-    feature_avg_bert_text_list = []
-    feature_avg_bert_summ_list = []
-    feature_std_bert_text_list = []
-    feature_std_bert_summ_list = []
+    feature_avg_flair_text_list = []
+    feature_avg_flair_summ_list = []
+    feature_std_flair_text_list = []
+    feature_std_flair_summ_list = []
     for i in range(len(associations)):
         product_weights = [product_age_weight[i], product_vote_weight[i], product_verification_weight[i],
                            product_image_weight[i]]
-        feature_avg_vader_text_list.append(get_avg_weight(vader_product_text_list[i], product_weights))
-        feature_avg_vader_summ_list.append(get_avg_weight(vader_product_summ_list[i], product_weights))
+        feature_avg_vader_text_list.append(get_avg_weight(
+            vader_product_text_list[i], product_weights))
+        feature_avg_vader_summ_list.append(get_avg_weight(
+            vader_product_summ_list[i], product_weights))
         feature_std_vader_text_list.append(get_std(vader_product_text_list[i]))
         feature_std_vader_summ_list.append(get_std(vader_product_summ_list[i]))
 
-        feature_avg_bert_text_list.append(get_avg_weight(bert_product_text_list[i], product_weights))
-        feature_avg_bert_summ_list.append(get_avg_weight(bert_product_summ_list[i], product_weights))
-        feature_std_bert_text_list.append(get_std(bert_product_text_list[i]))
-        feature_std_bert_summ_list.append(get_std(bert_product_summ_list[i]))
+        feature_avg_flair_text_list.append(get_avg_weight(
+            flair_product_text_list[i], product_weights))
+        feature_avg_flair_summ_list.append(get_avg_weight(
+            flair_product_summ_list[i], product_weights))
+        feature_std_flair_text_list.append(get_std(flair_product_text_list[i]))
+        feature_std_flair_summ_list.append(get_std(flair_product_summ_list[i]))
 
     vader_features = {"avg_text": feature_avg_vader_text_list,
                       "avg_summ": feature_avg_vader_summ_list,
@@ -251,22 +253,23 @@ def preprocess(associations, rev_df, vader_df, bert_df):
                       "amt_reviews": feature_num_rev_list,
                       "amt_stars": feature_stars_list}
 
-    bert_features = {"avg_text": feature_avg_bert_text_list,
-                     "avg_summ": feature_avg_bert_summ_list,
-                     "std_text": feature_std_bert_text_list,
-                     "std_summ": feature_std_bert_summ_list,
-                     "pct_verif": feature_verification_perc_list,
-                     "amt_reviews": feature_num_rev_list,
-                     "amt_stars": feature_stars_list}
+    flair_features = {"avg_text": feature_avg_flair_text_list,
+                      "avg_summ": feature_avg_flair_summ_list,
+                      "std_text": feature_std_flair_text_list,
+                      "std_summ": feature_std_flair_summ_list,
+                      "pct_verif": feature_verification_perc_list,
+                      "amt_reviews": feature_num_rev_list,
+                      "amt_stars": feature_stars_list}
 
-    return vader_features, bert_features
+    return vader_features, flair_features
     # return features
 
 
 def add_awesomeness(associations, features, awesomeness_training):
     class_awesomeness = []
     for asin in associations.keys():
-        class_awesomeness.append(awesomeness_training[awesomeness_training.asin == asin].awesomeness.values[0])
+        class_awesomeness.append(
+            awesomeness_training[awesomeness_training.asin == asin].awesomeness.values[0])
 
     features["awesomeness"] = class_awesomeness
     return features
@@ -277,97 +280,69 @@ def generate_feature_vectors():
     training_rev_file = "Toys_and_Games/train/review_training.json"
     training_prod_file = "Toys_and_Games/train/product_training.json"
     testing_rev_file = "Toys_and_Games/test3/review_test.json"
-    testing_prod_file = "Toys_and_Games/test3/product_test.json"
 
     reviews_training = pd.read_json(training_rev_file)
-    bert_training = pd.read_json(training_rev_file)
-    vader_training = pd.read_json(training_rev_file)
     awesomeness_training = pd.read_json(training_prod_file)
     reviews_test = pd.read_json(testing_rev_file)
-    vader_test = pd.read_json(testing_rev_file)
-    bert_test = pd.read_json(testing_rev_file)
-    asin_test = pd.read_json(testing_prod_file)
 
     # setup for vader sentiment
-    download('vader_lexicon')
     analyzer = SentimentIntensityAnalyzer()
     print("Running VADER Sentiment Analysis on training data...")
     start_vader_training_time = datetime.datetime.now()
-    vader_training = run_vader(analyzer, vader_training)
+    vadered_training = run_vader(analyzer, reviews_training, start_vader_training_time)
     end_vader_training_time = datetime.datetime.now()
     print("Done in ", end_vader_training_time - start_vader_training_time)
 
     print("Running VADER Sentiment Analysis on test data...")
     start_vader_test_time = datetime.datetime.now()
-    vader_test = run_vader(analyzer, vader_test)
+    vadered_test = run_vader(analyzer, reviews_test, start_vader_test_time)
     end_vader_test_time = datetime.datetime.now()
     print("Done in ", end_vader_test_time - start_vader_test_time)
 
-    # setup for bert sentiment
-    bert_repo = "nlptown/bert-base-multilingual-uncased-sentiment"
-    bert_config = AutoConfig.from_pretrained(bert_repo)
-    bert_config.max_length = 100000
-    bert_model = AutoModelForSequenceClassification.from_pretrained(bert_repo)
-    bert_tokenizer = AutoTokenizer.from_pretrained(bert_repo)
+    print("Running Flair Sentiment Analysis on training data...")
+    start_flair_training_time = datetime.datetime.now()
+    flaired_training = run_flair(vadered_training, start_flair_training_time)
+    end_flair_training_time = datetime.datetime.now()
+    print("Done in ", end_flair_training_time - start_flair_training_time)
 
-    bert_config_name = "./bert_config"
-    bert_model_name = "./bert_model"
-    bert_tokenizer_name = "./bert_tokenizer"
-    bert_config.save_pretrained(bert_config_name)
-    bert_model.save_pretrained(bert_model_name)
-    bert_tokenizer.save_pretrained(bert_tokenizer_name)
-
-    bert_config = AutoConfig.from_pretrained(bert_config_name)
-    model = AutoModelForSequenceClassification.from_pretrained(bert_model_name)
-    bert_tokenizer = AutoTokenizer.from_pretrained(bert_tokenizer_name)
-
-    device = torch.device("mps")
-    classifier = \
-        pipeline("sentiment-analysis", model=model, tokenizer=bert_tokenizer, config=bert_config, device=device)
-
-    print("Running BERT Sentiment Analysis on training data...")
-    start_bert_training_time = datetime.datetime.now()
-    bert_training = run_bert(classifier, bert_training, start_bert_training_time)
-    end_bert_training_time = datetime.datetime.now()
-    print("Done in ", end_bert_training_time - start_bert_training_time)
-
-    print("Running BERT Sentiment Analysis on testing data...")
-    start_bert_test_time = datetime.datetime.now()
-    bert_test = run_bert(classifier, bert_test, start_bert_test_time)
-    end_bert_test_time = datetime.datetime.now()
-    print("Done in ", end_bert_test_time - start_bert_test_time)
+    print("Running Flair Sentiment Analysis on testing data...")
+    start_flair_test_time = datetime.datetime.now()
+    flaired_test = run_flair(vadered_test, start_flair_test_time)
+    end_flair_test_time = datetime.datetime.now()
+    print("Done in ", end_flair_test_time - start_flair_test_time)
 
     print("Running associations on training")
-    associations_training = reviews_training.groupby('asin').apply(lambda x: x.index.tolist())
+    associations_training = reviews_training.groupby(
+        'asin').apply(lambda x: x.index.tolist())
 
     print("Running associations on test")
-    associations_test = reviews_test.groupby('asin').apply(lambda x: x.index.tolist())
+    associations_test = reviews_test.groupby(
+        'asin').apply(lambda x: x.index.tolist())
 
     # associations_training = pd.read_json('associations_training.json', typ='series')
     # associations_test = pd.read_json('associations_test.json', typ='series')
 
     # Preprocessing may run up to 30min (recent Mac M2 Pro)
     print("Preprocessing training")
-    features_vader_training, features_bert_training = \
-        preprocess(associations_training, reviews_training, vader_training, bert_training)  # uncomment to run
+    features_vader_training, features_flair_training = preprocess(associations_training, flaired_training)  # uncomment to run
     print("Adding ground truth")
     awesomeness = add_awesomeness(associations_training, features_vader_training, awesomeness_training)
-    awesomeness_sentiment = add_awesomeness(associations_training, features_bert_training, awesomeness_training)
+    awesomeness_sentiment = add_awesomeness(associations_training, features_flair_training, awesomeness_training)
 
     df_vader_training = pd.DataFrame(awesomeness, index=list(associations_training.keys()))
     df_vader_training.to_json("./features_vader_training.json")
 
-    df_bert_training = pd.DataFrame(awesomeness_sentiment, index=list(associations_training.keys()))
-    df_bert_training.to_json("./features_bert_training.json")
+    df_flair_training = pd.DataFrame(awesomeness_sentiment, index=list(associations_training.keys()))
+    df_flair_training.to_json("./features_flair_training.json")
 
     print("Preprocessing test")
-    features_vader_test, features_bert_test = preprocess(associations_test, reviews_test, vader_test, bert_test)
+    features_vader_test, features_flair_test = preprocess(associations_test, flaired_test)
 
     df_vader_test = pd.DataFrame(features_vader_test, index=list(associations_test.keys()))
     df_vader_test.to_json("./features_vader_test3.json")
 
-    df_bert_test = pd.DataFrame(features_bert_test, index=list(associations_test.keys()))
-    df_bert_test.to_json("./features_bert_test3.json")
+    df_flair_test = pd.DataFrame(features_flair_test, index=list(associations_test.keys()))
+    df_flair_test.to_json("./features_flair_test3.json")
 
 
 def grid_search(X, Y):
@@ -490,7 +465,8 @@ def late_fuse(estimator_list, X, Y, low1, high1, low2, high2, step):
             a3 = alpha3 / 100
             vc_params["weights"].append([a1, a2, a3])
 
-    vc_grid = GridSearchCV(model_vc, vc_params, cv=10, scoring="f1", verbose=2)  # change back to cv=10
+    vc_grid = GridSearchCV(model_vc, vc_params, cv=10,
+                           scoring="f1", verbose=2)  # change back to cv=10
     vc_grid.fit(X, Y)
     vc_best_params = vc_grid.best_params_
     print("Voting Classifier best params: ", vc_best_params)
@@ -503,7 +479,8 @@ def fine_late_fuse(estimator_list, X, Y, weights):
     a2 = int(weights[1] * 100)
     a3 = int(weights[2] * 100)
 
-    model_vc = VotingClassifier(estimators=estimator_list, voting='soft', n_jobs=-1)
+    model_vc = VotingClassifier(
+        estimators=estimator_list, voting='soft', n_jobs=-1)
     vc_params = {
         'weights': []
     }
@@ -514,7 +491,8 @@ def fine_late_fuse(estimator_list, X, Y, weights):
                 if i + j + k == 100:
                     vc_params['weights'].append([i / 100, j / 100, k / 100])
 
-    vc_grid = GridSearchCV(model_vc, vc_params, cv=10, scoring="f1", verbose=2)  # change back to cv=10
+    vc_grid = GridSearchCV(model_vc, vc_params, cv=10,
+                           scoring="f1", verbose=2)  # change back to cv=10
     vc_grid.fit(X, Y)
     vc_best_params = vc_grid.best_params_
     print("Voting Classifier best params: ", vc_best_params)
@@ -531,32 +509,32 @@ def main():
     # Read feature vectors from file if already preprocessed
     print("Reading feature vectors from file")
     features_vader_training = pd.read_json("features_vader_training.json")
-    features_bert_training = pd.read_json("features_bert_training.json")
+    features_flair_training = pd.read_json("features_flair_training.json")
     features_vader_test = pd.read_json("features_vader_test3.json")
-    features_bert_test = pd.read_json("features_bert_test3.json")
+    features_flair_test = pd.read_json("features_flair_test3.json")
 
     feature_cols = ['avg_text', 'avg_summ', 'std_text', 'std_summ', 'pct_verif', 'amt_reviews',
                     'amt_stars']
     X_vader = features_vader_training[feature_cols]
     Y_vader = features_vader_training.awesomeness
-    X_bert = features_bert_training[feature_cols]
-    Y_bert = features_bert_training.awesomeness
+    X_flair = features_flair_training[feature_cols]
+    Y_flair = features_flair_training.awesomeness
 
     # Scaling
     scaler = MinMaxScaler(feature_range=(-1, 1)).fit(X_vader)
     X_vader = scaler.transform(X_vader)
-    X_bert = scaler.transform(X_bert)
+    X_flair = scaler.transform(X_flair)
 
     # Perform Grid Search
     # dt_best_params, lr_best_params, rf_best_params, svm_best_params, knn_best_params, ab_best_params = grid_search(X, Y)
 
     mlp_best_params_vader = grid_search(X_vader, Y_vader)
-    mlp_best_params_bert = grid_search(X_bert, Y_bert)
+    mlp_best_params_flair = grid_search(X_flair, Y_flair)
     with open("mlp_params.txt", 'a') as file:
         file.write("MLP Best Params for VADER:")
         file.write(str(mlp_best_params_vader))
-        file.write("MLP Best Params for BERT:")
-        file.write(str(mlp_best_params_bert))
+        file.write("MLP Best Params for flair:")
+        file.write(str(mlp_best_params_flair))
 
     # Put in parameters by hand to skip Grid Search - Classifiers not used are commented out
     # model_dt = DecisionTreeClassifier(class_weight=None, criterion="entropy", splitter="best")
@@ -571,8 +549,10 @@ def main():
     #     n_estimators=13, learning_rate=2.075)
 
     ### Neural Nets ###
-    model_mlp_bert = MLPClassifier(alpha=1e-8, hidden_layer_sizes=(5, 5, 5), max_iter=10000, solver="adam")
-    model_mlp_vader = MLPClassifier(alpha=1e-8, hidden_layer_sizes=(5, 5, 5), max_iter=10000, solver="adam")
+    model_mlp_flair = MLPClassifier(
+        alpha=1e-8, hidden_layer_sizes=(5, 5, 5), max_iter=10000, solver="adam")
+    model_mlp_vader = MLPClassifier(
+        alpha=1e-8, hidden_layer_sizes=(5, 5, 5), max_iter=10000, solver="adam")
 
     ### Late Fusion ###
     # Use VotingClassifier to implement late fusion
@@ -588,16 +568,20 @@ def main():
     # Put in parameters by hand to skip Grid Search
     # model_vc = VotingClassifier(estimators=estimator_list, voting='soft', weights=[0.12, 0.72, 0.16], verbose=True, n_jobs=-1)
 
-    vader_models = [value for name, value in locals().items() if name.startswith('model_') and name.endswith('_vader')]
-    vader_model_names = [name for name, value in locals().items() if name.startswith('model_') and name.endswith('_vader')]
-    bert_models = [value for name, value in locals().items() if name.startswith('model_') and name.endswith('_bert')]
-    bert_model_names = [name for name, value in locals().items() if name.startswith('model_') and name.endswith('_bert')]
+    vader_models = [value for name, value in locals().items(
+    ) if name.startswith('model_') and name.endswith('_vader')]
+    vader_model_names = [name for name, value in locals().items(
+    ) if name.startswith('model_') and name.endswith('_vader')]
+    flair_models = [value for name, value in locals().items(
+    ) if name.startswith('model_') and name.endswith('_flair')]
+    flair_model_names = [name for name, value in locals().items(
+    ) if name.startswith('model_') and name.endswith('_flair')]
 
     vader_scores = {}
-    bert_scores = {}
+    flair_scores = {}
     scoring_methods = ['recall', 'precision', 'f1', 'roc_auc', 'accuracy']
     vader_scores_avg = {}
-    bert_scores_avg = {}
+    flair_scores_avg = {}
 
     # Train models using 10-fold cross validation
     for i in range(len(vader_models)):
@@ -605,37 +589,45 @@ def main():
         print("Running cross validation on " + model_name)
         vader_models[i].fit(X_vader, Y_vader)
         vader_scores[model_name] = \
-            cross_validate(vader_models[i], X_vader, Y_vader, cv=10, scoring=scoring_methods)
+            cross_validate(vader_models[i], X_vader,
+                           Y_vader, cv=10, scoring=scoring_methods)
         vader_scores_avg[model_name] = {}
         for method in scoring_methods:
-            vader_scores_avg[model_name][method] = np.mean(vader_scores[model_name]["test_" + method])
-        pickle.dump(vader_models[i], open("./models/" + model_name + "_vader.pkl", "wb"))
+            vader_scores_avg[model_name][method] = np.mean(
+                vader_scores[model_name]["test_" + method])
+        pickle.dump(vader_models[i], open(
+            "./models/" + model_name + "_vader.pkl", "wb"))
 
-    for i in range(len(bert_models)):
-        model_name = bert_model_names[i]
+    for i in range(len(flair_models)):
+        model_name = flair_model_names[i]
         print("Running cross validation on " + model_name)
-        bert_models[i].fit(X_bert, Y_bert)
-        bert_scores[model_name] = \
-            cross_validate(bert_models[i], X_bert, Y_bert, cv=10, scoring=scoring_methods)
-        bert_scores_avg[model_name] = {}
+        flair_models[i].fit(X_flair, Y_flair)
+        flair_scores[model_name] = \
+            cross_validate(flair_models[i], X_flair,
+                           Y_flair, cv=10, scoring=scoring_methods)
+        flair_scores_avg[model_name] = {}
         for method in scoring_methods:
-            bert_scores_avg[model_name][method] = np.mean(bert_scores[model_name]["test_" + method])
-        pickle.dump(bert_models[i], open("./models/" + model_name + "_bert.pkl", "wb"))
+            flair_scores_avg[model_name][method] = np.mean(
+                flair_scores[model_name]["test_" + method])
+        pickle.dump(flair_models[i], open(
+            "./models/" + model_name + "_flair.pkl", "wb"))
 
     ### Visualize Scores ###
     print("Generating bar plots")
-    generate_bar_plot(vader_models, vader_model_names, scoring_methods[0:3], vader_scores_avg)
-    generate_bar_plot(bert_models, bert_model_names, scoring_methods[0:3], bert_scores_avg)
+    generate_bar_plot(vader_models, vader_model_names,
+                      scoring_methods[0:3], vader_scores_avg)
+    generate_bar_plot(flair_models, flair_model_names,
+                      scoring_methods[0:3], flair_scores_avg)
 
     print("Printing scores to vader_scores_avg.csv")
     vader_scores_avg_df = pd.DataFrame(vader_scores_avg)
     vader_scores_avg_df = vader_scores_avg_df.round(4)
     vader_scores_avg_df.to_csv("./scores/vader_scores_avg.csv")
 
-    print("Printing scores to bert_scores_avg.csv")
-    bert_scores_avg_df = pd.DataFrame(bert_scores_avg)
-    bert_scores_avg_df = vader_scores_avg_df.round(4)
-    bert_scores_avg_df.to_csv("./scores/bert_scores_avg.csv")
+    print("Printing scores to flair_scores_avg.csv")
+    flair_scores_avg_df = pd.DataFrame(flair_scores_avg)
+    flair_scores_avg_df = vader_scores_avg_df.round(4)
+    flair_scores_avg_df.to_csv("./scores/flair_scores_avg.csv")
 
     ### Read models if dumped ###
     print("Reading dumped models from file")
@@ -647,7 +639,7 @@ def main():
     # model_knn = pickle.load(open("./models/model_knn.pkl", "rb"))
     # model_ab = pickle.load(open("./models/model_ab.pkl", "rb"))
     # model_vc = pickle.load(open("./models/model_vc.pkl", "rb"))
-    model_mlp_vader = pickle.load(open("./models/model_mlp_bert.pkl", "rb"))
+    model_mlp_vader = pickle.load(open("./models/model_mlp_flair.pkl", "rb"))
 
     final_model = model_mlp_vader
 
