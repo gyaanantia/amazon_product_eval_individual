@@ -26,24 +26,40 @@ from huggingface_hub import hf_hub_download
 
 ### Helper Functions ###
 def run_vader(analyzer, vader_df):
-    vader_df = vader_df['reviewText', 'summary']\
-        .apply(lambda x: analyzer.polarity_scores(x)['compound'] if x is not None else None)
+    text_scores = list(vader_df['reviewText'].apply(lambda x: analyzer.polarity_scores(x)['compound'] if x is not None else None))
+    vader_df.reviewText = text_scores
+    summ_scores = list(vader_df['summary'].apply(lambda x: analyzer.polarity_scores(x)['compound'] if x is not None else None))
+    vader_df.summary = summ_scores
     return vader_df
 
 
-def run_bert(classifier, bert_df):
-    rev_list = list(bert_df['reviewText'].apply(lambda x: x[:512] if x is not None else ""))
+def extract_star(x):
+    return round(int(x['label'][0]) * 0.2, 1)
+
+
+def run_bert(classifier, bert_df, start_time):
     rev_none_list = bert_df[bert_df['reviewText'].isnull()].index.to_list()
-    rev_pred_list = classifier.predict(rev_list)
+    rev_list = list(bert_df['reviewText'].apply(lambda x: x[:512] if x is not None else ""))
+    rev_dict_list = classifier.predict(rev_list)
+    rev_pred_list = list(map(extract_star, rev_dict_list))
 
     bert_df.reviewText = rev_pred_list
-    bert_df = bert_df['reviewText'].apply(lambda x: x if x.index not in rev_none_list else None)
+    put_back_null = list(bert_df['reviewText'].apply(lambda x: x if x.index not in rev_none_list else None))
+    bert_df.reviewText = put_back_null
+    end_text_time = datetime.datetime.now()
+    print("Done with text, starting summary")
+    print("Time elapsed: ", end_text_time - start_time)
 
-    summ_list = list(bert_df['summary'].apply(lambda x: x[:512]))
-    summ_pred_list = classifier.predict(summ_list)
+    summ_none_list = bert_df[bert_df['summary'].isnull()].index.to_list()
+    summ_list = list(bert_df['summary'].apply(lambda x: x[:512] if x is not None else ""))
+    summ_dict_list = classifier.predict(summ_list)
+    summ_pred_list = list(map(extract_star, summ_dict_list))
 
     bert_df.summary = summ_pred_list
+    put_back_null_summ = list(bert_df['summary'].apply(lambda x: x if x.index not in summ_none_list else None))
+    bert_df.summary = put_back_null_summ
     return bert_df
+
 def get_age_weight(rev_training, index, first_rev_time):
     return ((0.01) / (365 * 24 * 3600)) * (rev_training.unixReviewTime[index] - first_rev_time) + 1
 
@@ -276,10 +292,16 @@ def generate_feature_vectors():
     download('vader_lexicon')
     analyzer = SentimentIntensityAnalyzer()
     print("Running VADER Sentiment Analysis on training data...")
+    start_vader_training_time = datetime.datetime.now()
     vader_training = run_vader(analyzer, vader_training)
+    end_vader_training_time = datetime.datetime.now()
+    print("Done in ", end_vader_training_time - start_vader_training_time)
 
     print("Running VADER Sentiment Analysis on test data...")
+    start_vader_test_time = datetime.datetime.now()
     vader_test = run_vader(analyzer, vader_test)
+    end_vader_test_time = datetime.datetime.now()
+    print("Done in ", end_vader_test_time - start_vader_test_time)
 
     # setup for bert sentiment
     bert_repo = "nlptown/bert-base-multilingual-uncased-sentiment"
@@ -304,10 +326,16 @@ def generate_feature_vectors():
         pipeline("sentiment-analysis", model=model, tokenizer=bert_tokenizer, config=bert_config, device=device)
 
     print("Running BERT Sentiment Analysis on training data...")
-    bert_training = run_bert(classifier, bert_training)
+    start_bert_training_time = datetime.datetime.now()
+    bert_training = run_bert(classifier, bert_training, start_bert_training_time)
+    end_bert_training_time = datetime.datetime.now()
+    print("Done in ", end_bert_training_time - start_bert_training_time)
 
     print("Running BERT Sentiment Analysis on testing data...")
-    bert_test = run_bert(classifier, bert_test)
+    start_bert_test_time = datetime.datetime.now()
+    bert_test = run_bert(classifier, bert_test, start_bert_test_time)
+    end_bert_test_time = datetime.datetime.now()
+    print("Done in ", end_bert_test_time - start_bert_test_time)
 
     print("Running associations on training")
     associations_training = reviews_training.groupby('asin').apply(lambda x: x.index.tolist())
@@ -320,26 +348,26 @@ def generate_feature_vectors():
 
     # Preprocessing may run up to 30min (recent Mac M2 Pro)
     print("Preprocessing training")
-    features_training, features_sentiment_training = \
+    features_vader_training, features_bert_training = \
         preprocess(associations_training, reviews_training, vader_training, bert_training)  # uncomment to run
     print("Adding ground truth")
-    awesomeness = add_awesomeness(associations_training, features_training, awesomeness_training)
-    awesomeness_sentiment = add_awesomeness(associations_training, features_sentiment_training, awesomeness_training)
+    awesomeness = add_awesomeness(associations_training, features_vader_training, awesomeness_training)
+    awesomeness_sentiment = add_awesomeness(associations_training, features_bert_training, awesomeness_training)
 
-    df_training = pd.DataFrame(awesomeness, index=list(associations_training.keys()))
-    df_training.to_json("./features_training.json")
+    df_vader_training = pd.DataFrame(awesomeness, index=list(associations_training.keys()))
+    df_vader_training.to_json("./features_vader_training.json")
 
-    df_sentiment_training = pd.DataFrame(awesomeness_sentiment, index=list(associations_training.keys()))
-    df_sentiment_training.to_json("./features_sentiment_training.json")
+    df_bert_training = pd.DataFrame(awesomeness_sentiment, index=list(associations_training.keys()))
+    df_bert_training.to_json("./features_bert_training.json")
 
     print("Preprocessing test")
-    features_test, features_sentiment_test = preprocess(associations_test, reviews_test, vader_test, bert_test)
+    features_vader_test, features_bert_test = preprocess(associations_test, reviews_test, vader_test, bert_test)
 
-    df_test = pd.DataFrame(features_test, index=list(associations_test.keys()))
-    df_test.to_json("./features_test3.json")
+    df_vader_test = pd.DataFrame(features_vader_test, index=list(associations_test.keys()))
+    df_vader_test.to_json("./features_vader_test3.json")
 
-    df_sentiment_test = pd.DataFrame(features_sentiment_test, index=list(associations_test.keys()))
-    df_sentiment_test.to_json("./features_sentiment_test3.json")
+    df_bert_test = pd.DataFrame(features_bert_test, index=list(associations_test.keys()))
+    df_bert_test.to_json("./features_bert_test3.json")
 
 
 def grid_search(X, Y):
@@ -502,25 +530,33 @@ def main():
     ### Training ###
     # Read feature vectors from file if already preprocessed
     print("Reading feature vectors from file")
-    features_training = pd.read_json("features_training.json")
-    features_test = pd.read_json("features_test3.json")
+    features_vader_training = pd.read_json("features_vader_training.json")
+    features_bert_training = pd.read_json("features_bert_training.json")
+    features_vader_test = pd.read_json("features_vader_test3.json")
+    features_bert_test = pd.read_json("features_bert_test3.json")
 
     feature_cols = ['avg_text', 'avg_summ', 'std_text', 'std_summ', 'pct_verif', 'amt_reviews',
                     'amt_stars']
-    X = features_training[feature_cols]
-    Y = features_training.awesomeness
+    X_vader = features_vader_training[feature_cols]
+    Y_vader = features_vader_training.awesomeness
+    X_bert = features_bert_training[feature_cols]
+    Y_bert = features_bert_training.awesomeness
 
     # Scaling
-    scaler = MinMaxScaler(feature_range=(-1, 1)).fit(X)
-    X = scaler.transform(X)
+    scaler = MinMaxScaler(feature_range=(-1, 1)).fit(X_vader)
+    X_vader = scaler.transform(X_vader)
+    X_bert = scaler.transform(X_bert)
 
     # Perform Grid Search
     # dt_best_params, lr_best_params, rf_best_params, svm_best_params, knn_best_params, ab_best_params = grid_search(X, Y)
 
-    # mlp_best_params = grid_search(X, Y)
-    # with open("mlp_params.txt", 'a') as file:
-    #     file.write("MLP Best Params:")
-    #     file.write(str(mlp_best_params))
+    mlp_best_params_vader = grid_search(X_vader, Y_vader)
+    mlp_best_params_bert = grid_search(X_bert, Y_bert)
+    with open("mlp_params.txt", 'a') as file:
+        file.write("MLP Best Params for VADER:")
+        file.write(str(mlp_best_params_vader))
+        file.write("MLP Best Params for BERT:")
+        file.write(str(mlp_best_params_bert))
 
     # Put in parameters by hand to skip Grid Search - Classifiers not used are commented out
     # model_dt = DecisionTreeClassifier(class_weight=None, criterion="entropy", splitter="best")
@@ -535,7 +571,8 @@ def main():
     #     n_estimators=13, learning_rate=2.075)
 
     ### Neural Nets ###
-    model_mlp = MLPClassifier(alpha=1e-8, hidden_layer_sizes=(5, 5, 5), max_iter=10000, solver="adam")
+    model_mlp_bert = MLPClassifier(alpha=1e-8, hidden_layer_sizes=(5, 5, 5), max_iter=10000, solver="adam")
+    model_mlp_vader = MLPClassifier(alpha=1e-8, hidden_layer_sizes=(5, 5, 5), max_iter=10000, solver="adam")
 
     ### Late Fusion ###
     # Use VotingClassifier to implement late fusion
@@ -551,33 +588,54 @@ def main():
     # Put in parameters by hand to skip Grid Search
     # model_vc = VotingClassifier(estimators=estimator_list, voting='soft', weights=[0.12, 0.72, 0.16], verbose=True, n_jobs=-1)
 
-    models = [value for name, value in locals().items() if name.startswith('model_')]
-    model_names = [name for name, value in locals().items() if name.startswith('model_')]
+    vader_models = [value for name, value in locals().items() if name.startswith('model_') and name.endswith('_vader')]
+    vader_model_names = [name for name, value in locals().items() if name.startswith('model_') and name.endswith('_vader')]
+    bert_models = [value for name, value in locals().items() if name.startswith('model_') and name.endswith('_bert')]
+    bert_model_names = [name for name, value in locals().items() if name.startswith('model_') and name.endswith('_bert')]
 
-    scores = {}
+    vader_scores = {}
+    bert_scores = {}
     scoring_methods = ['recall', 'precision', 'f1', 'roc_auc', 'accuracy']
-    scores_avg = {}
+    vader_scores_avg = {}
+    bert_scores_avg = {}
 
     # Train models using 10-fold cross validation
-    for i in range(len(models)):
-        model_name = model_names[i]
+    for i in range(len(vader_models)):
+        model_name = vader_model_names[i]
         print("Running cross validation on " + model_name)
-        models[i].fit(X, Y)
-        scores[model_name] = \
-            cross_validate(models[i], X, Y, cv=10, scoring=scoring_methods)
-        scores_avg[model_name] = {}
+        vader_models[i].fit(X_vader, Y_vader)
+        vader_scores[model_name] = \
+            cross_validate(vader_models[i], X_vader, Y_vader, cv=10, scoring=scoring_methods)
+        vader_scores_avg[model_name] = {}
         for method in scoring_methods:
-            scores_avg[model_name][method] = np.mean(scores[model_name]["test_" + method])
-        pickle.dump(models[i], open("./models/" + model_name + ".pkl", "wb"))
+            vader_scores_avg[model_name][method] = np.mean(vader_scores[model_name]["test_" + method])
+        pickle.dump(vader_models[i], open("./models/" + model_name + "_vader.pkl", "wb"))
+
+    for i in range(len(bert_models)):
+        model_name = bert_model_names[i]
+        print("Running cross validation on " + model_name)
+        bert_models[i].fit(X_bert, Y_bert)
+        bert_scores[model_name] = \
+            cross_validate(bert_models[i], X_bert, Y_bert, cv=10, scoring=scoring_methods)
+        bert_scores_avg[model_name] = {}
+        for method in scoring_methods:
+            bert_scores_avg[model_name][method] = np.mean(bert_scores[model_name]["test_" + method])
+        pickle.dump(bert_models[i], open("./models/" + model_name + "_bert.pkl", "wb"))
 
     ### Visualize Scores ###
-    print("Generating bar plot")
-    generate_bar_plot(models, model_names, scoring_methods[0:3], scores_avg)
+    print("Generating bar plots")
+    generate_bar_plot(vader_models, vader_model_names, scoring_methods[0:3], vader_scores_avg)
+    generate_bar_plot(bert_models, bert_model_names, scoring_methods[0:3], bert_scores_avg)
 
-    print("Printing scores to scores_avg.csv")
-    scores_avg_df = pd.DataFrame(scores_avg)
-    scores_avg_df = scores_avg_df.round(4)
-    scores_avg_df.to_csv("./scores/scores_avg.csv")
+    print("Printing scores to vader_scores_avg.csv")
+    vader_scores_avg_df = pd.DataFrame(vader_scores_avg)
+    vader_scores_avg_df = vader_scores_avg_df.round(4)
+    vader_scores_avg_df.to_csv("./scores/vader_scores_avg.csv")
+
+    print("Printing scores to bert_scores_avg.csv")
+    bert_scores_avg_df = pd.DataFrame(bert_scores_avg)
+    bert_scores_avg_df = vader_scores_avg_df.round(4)
+    bert_scores_avg_df.to_csv("./scores/bert_scores_avg.csv")
 
     ### Read models if dumped ###
     print("Reading dumped models from file")
@@ -587,14 +645,15 @@ def main():
     # model_rf = pickle.load(open("./models/model_rf.pkl", "rb"))
     # model_svm = pickle.load(open("./models/model_svm.pkl", "rb"))
     # model_knn = pickle.load(open("./models/model_knn.pkl", "rb"))
-    model_ab = pickle.load(open("./models/model_ab.pkl", "rb"))
+    # model_ab = pickle.load(open("./models/model_ab.pkl", "rb"))
     # model_vc = pickle.load(open("./models/model_vc.pkl", "rb"))
+    model_mlp_vader = pickle.load(open("./models/model_mlp_bert.pkl", "rb"))
 
-    final_model = model_ab
+    final_model = model_mlp_vader
 
     ### Predictions ###
     print("Running predictions")
-    X_test = features_test[feature_cols]
+    X_test = features_vader_test[feature_cols]
     X_test = scaler.transform(X_test)
 
     predictions = final_model.predict(X_test)
