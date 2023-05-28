@@ -446,7 +446,7 @@ def grid_search(X, Y):
 
 
 def late_fuse(estimator_list, X, Y, low1, high1, low2, high2, step):
-    model_vc = VotingClassifier(estimators=estimator_list, voting='soft')
+    model_vc = VotingClassifier(estimators=estimator_list, voting='soft', n_jobs=-1)
     vc_params = {
         "weights": []
     }
@@ -459,8 +459,7 @@ def late_fuse(estimator_list, X, Y, low1, high1, low2, high2, step):
             a3 = alpha3 / 100
             vc_params["weights"].append([a1, a2, a3])
 
-    vc_grid = GridSearchCV(model_vc, vc_params, cv=10,
-                           scoring="f1", verbose=2)  # change back to cv=10
+    vc_grid = GridSearchCV(model_vc, vc_params, cv=10, scoring="f1", verbose=2, n_jobs=-1)  # change back to cv=10
     vc_grid.fit(X, Y)
     vc_best_params = vc_grid.best_params_
     print("Voting Classifier best params: ", vc_best_params)
@@ -485,8 +484,7 @@ def fine_late_fuse(estimator_list, X, Y, weights):
                 if i + j + k == 100:
                     vc_params['weights'].append([i / 100, j / 100, k / 100])
 
-    vc_grid = GridSearchCV(model_vc, vc_params, cv=10,
-                           scoring="f1", verbose=2)  # change back to cv=10
+    vc_grid = GridSearchCV(model_vc, vc_params, cv=10, scoring="f1", verbose=2, n_jobs=-1)  # change back to cv=10
     vc_grid.fit(X, Y)
     vc_best_params = vc_grid.best_params_
     print("Voting Classifier best params: ", vc_best_params)
@@ -595,17 +593,30 @@ def main():
 
     ### Late Fusion ###
     # Use VotingClassifier to implement late fusion
-    # estimator_list = [('LR', model_lr), ('RF', model_rf), ('KNN', model_knn)]
+    estimator_list_vader = [('MLP', model_mlp_vader), ('RF', model_rf_vader), ('KNN', model_knn_vader)]
+    estimator_list_blob = [('MLP', model_mlp_blob), ('RF', model_rf_blob), ('KNN', model_knn_blob)]
 
-    # model_vc = VotingClassifier(estimators=estimator_list, voting='soft', weights=[0.0, 1.0], verbose=True, n_jobs=-1)
-    # vc_coarse_params = late_fuse(estimator_list, X, Y, 0, 101, 0, 101, 5)
-    # print("After coarse search best params for late fusion: ", vc_coarse_params)
-    # vc_coarse_params = {'weights': [0.15, 0.75, 0.1]}  # Coarse parameters found for LR, RF, KNN
-    # vc_fine_params = fine_late_fuse(estimator_list, X, Y, vc_coarse_params['weights'])
-    # print("After fine search best params for late fusion: ", vc_fine_params)
+    # model_vc_vader = VotingClassifier(estimators=estimator_list_vader, voting='soft', weights=[0.0, 1.0], verbose=True, n_jobs=-1)
+    # model_vc_blob = VotingClassifier(estimators=estimator_list_blob, voting='soft', weights=[0.0, 1.0], verbose=True, n_jobs=-1)
+    # vc_coarse_params_vader = late_fuse(estimator_list_vader, X_vader, Y_vader, 0, 101, 0, 101, 5)
+    # vc_coarse_params_blob = late_fuse(estimator_list_blob, X_blob, Y_blob, 0, 101, 0, 101, 5)
+    # print("After coarse search best vader params for late fusion: ", vc_coarse_params_vader)
+    # print("After coarse search best blob params for late fusion: ", vc_coarse_params_blob)
+    #
+    # vc_fine_params_vader = fine_late_fuse(estimator_list_vader, X_vader, Y_vader, vc_coarse_params_vader['weights'])
+    # vc_fine_params_blob = fine_late_fuse(estimator_list_blob, X_blob, Y_blob, vc_coarse_params_blob['weights'])
+    # print("After fine search best vader params for late fusion: ", vc_fine_params_vader)
+    # print("After fine search best blob params for late fusion: ", vc_fine_params_blob)
+    # with open("best_vc_params.txt", 'a') as file:
+    #     file.write("Best VC Params for VADER:\n")
+    #     file.write(str(vc_fine_params_vader))
+    #     file.write("\n")
+    #     file.write("Best VC Params for blob:\n")
+    #     file.write(str(vc_fine_params_blob))
 
     # Put in parameters by hand to skip Grid Search
-    # model_vc = VotingClassifier(estimators=estimator_list, voting='soft', weights=[0.12, 0.72, 0.16], verbose=True, n_jobs=-1)
+    model_vc_vader = VotingClassifier(estimators=estimator_list_vader, voting='soft', weights=[0.56, 0.41, 0.03], verbose=True, n_jobs=-1)
+    model_vc_blob = VotingClassifier(estimators=estimator_list_blob, voting='soft', weights=[0.57, 0.27, 0.16], verbose=True, n_jobs=-1)
 
     vader_models = [value for name, value in locals().items() if name.startswith('model_') and name.endswith('_vader')]
     vader_model_names = [name for name, value in locals().items() if name.startswith('model_') and name.endswith('_vader')]
@@ -661,7 +672,7 @@ def main():
 
     print("Printing scores to blob_scores_avg.csv")
     blob_scores_avg_df = pd.DataFrame(blob_scores_avg)
-    blob_scores_avg_df = vader_scores_avg_df.round(4)
+    blob_scores_avg_df = blob_scores_avg_df.round(4)
     blob_scores_avg_df.to_csv("./scores/blob_scores_avg.csv")
 
     ### Read models if dumped ###
