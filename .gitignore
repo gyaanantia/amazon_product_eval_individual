@@ -1,4 +1,4 @@
 .DS_Store
 .idea
-**bert_*
-**Toys_and_Games/
+source/Toys_and_Games/
+source/models/*

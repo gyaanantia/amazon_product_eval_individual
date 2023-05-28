@@ -1,0 +1,13 @@
+DT Best Params for blob:
+{'class_weight': 'balanced', 'criterion': 'log_loss', 'splitter': 'best'}
+LR Best Params for blob:
+{'C': 0.01, 'class_weight': None, 'max_iter': 1000, 'tol': 0.1}
+RF Best Params for blob:
+{'class_weight': None, 'criterion': 'log_loss', 'max_depth': 16, 'n_estimators': 500}
+SVM Best Params for blob:
+{'C': 20, 'gamma': 'scale', 'kernel': 'rbf', 'tol': 0.1}
+KNN Best Params for blob:
+{'algorithm': 'brute', 'leaf_size': 10, 'n_neighbors': 20, 'weights': 'distance'}
+AB Best Params for blob:
+{'estimator__max_depth': 5, 'learning_rate': 2.075, 'n_estimators': 13}
+MLP Best Params for blob{'alpha': 1e-09, 'hidden_layer_sizes': (6, 6, 6), 'max_iter': 10000, 'solver': 'adam'}
