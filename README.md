@@ -1,5 +1,5 @@
 # CS349 Machine Learning - AmazonProductEvaluation
-## Group Project - Final Model Preditcions ##
+## Indiviual Project - Sentiment Analysis ##
 
 Individual portion for gfa2226
 
