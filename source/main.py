@@ -495,7 +495,7 @@ def fine_late_fuse(estimator_list, X, Y, weights):
 ### Main ###
 def main():
     # Preprocessing - uncomment if needed
-    # generate_feature_vectors()
+    generate_feature_vectors()
 
     ### Training ###
     # Read feature vectors from file if already preprocessed
@@ -565,19 +565,21 @@ def main():
     #     file.write("MLP Best Params for blob")
     #     file.write(str(mlp_params_blob))
 
-
     # Put in parameters by hand to skip Grid Search - Classifiers not used are commented out
     model_dt_vader = DecisionTreeClassifier(class_weight="balanced", criterion="log_loss", splitter="best")
     model_dt_blob = DecisionTreeClassifier(class_weight="balanced", criterion="log_loss", splitter="best")
-    model_nb = GaussianNB()
     model_lr_vader = LogisticRegression(C=0.01, class_weight=None, max_iter=1000, tol=0.1, n_jobs=-1)
     model_lr_blob = LogisticRegression(C=0.01, class_weight=None, max_iter=1000, tol=0.1, n_jobs=-1)
-    model_rf_vader = RandomForestClassifier(max_depth=8, n_estimators=300, n_jobs=-1, criterion="gini", class_weight=None)
-    model_rf_blob = RandomForestClassifier(class_weight=None, criterion="log_loss", max_depth=16, n_estimators=500, n_jobs=-1)
-    model_svm_vader = SVC(kernel='rbf', verbose=True, max_iter=1000000, tol=0.1, C=10, gamma="auto")
-    model_svm_blob = SVC(C=20, gamma="scale", kernel="rbf", tol=0.1, verbose=True, max_iter=1000000)
-    model_knn_vader = KNeighborsClassifier(n_neighbors=20, weights='distance', leaf_size=40, algorithm='auto', n_jobs=-1)
-    model_knn_blob = KNeighborsClassifier(algorithm='brute', leaf_size=10, n_neighbors=20, weights='distance', n_jobs=-1)
+    model_rf_vader = RandomForestClassifier(max_depth=8, n_estimators=300, n_jobs=-1, criterion="gini",
+                                            class_weight=None)
+    model_rf_blob = RandomForestClassifier(class_weight=None, criterion="log_loss", max_depth=16, n_estimators=500,
+                                           n_jobs=-1)
+    # model_svm_vader = SVC(kernel='rbf', verbose=True, max_iter=1000000, tol=0.1, C=10, gamma="auto")
+    # model_svm_blob = SVC(C=20, gamma="scale", kernel="rbf", tol=0.1, verbose=True, max_iter=1000000)
+    model_knn_vader = KNeighborsClassifier(n_neighbors=20, weights='distance', leaf_size=40, algorithm='auto',
+                                           n_jobs=-1)
+    model_knn_blob = KNeighborsClassifier(algorithm='brute', leaf_size=10, n_neighbors=20, weights='distance',
+                                          n_jobs=-1)
     ### Boosting ###
     model_ab_vader = AdaBoostClassifier(
         RandomForestClassifier(max_depth=5, n_estimators=100, n_jobs=-1, criterion="log_loss", class_weight=None),
@@ -615,13 +617,17 @@ def main():
     #     file.write(str(vc_fine_params_blob))
 
     # Put in parameters by hand to skip Grid Search
-    model_vc_vader = VotingClassifier(estimators=estimator_list_vader, voting='soft', weights=[0.56, 0.41, 0.03], verbose=True, n_jobs=-1)
-    model_vc_blob = VotingClassifier(estimators=estimator_list_blob, voting='soft', weights=[0.57, 0.27, 0.16], verbose=True, n_jobs=-1)
+    model_vc_vader = VotingClassifier(estimators=estimator_list_vader, voting='soft', weights=[0.56, 0.41, 0.03],
+                                      verbose=True, n_jobs=-1)
+    model_vc_blob = VotingClassifier(estimators=estimator_list_blob, voting='soft', weights=[0.57, 0.27, 0.16],
+                                     verbose=True, n_jobs=-1)
 
     vader_models = [value for name, value in locals().items() if name.startswith('model_') and name.endswith('_vader')]
-    vader_model_names = [name for name, value in locals().items() if name.startswith('model_') and name.endswith('_vader')]
+    vader_model_names = [name for name, value in locals().items() if
+                         name.startswith('model_') and name.endswith('_vader')]
     blob_models = [value for name, value in locals().items() if name.startswith('model_') and name.endswith('_blob')]
-    blob_model_names = [name for name, value in locals().items() if name.startswith('model_') and name.endswith('_blob')]
+    blob_model_names = [name for name, value in locals().items() if
+                        name.startswith('model_') and name.endswith('_blob')]
 
     vader_scores = {}
     blob_scores = {}
@@ -659,11 +665,55 @@ def main():
             "./models/" + model_name + ".pkl", "wb"))
 
     ### Visualize Scores ###
-    print("Generating bar plots")
-    generate_bar_plot(vader_models, vader_model_names,
-                      scoring_methods[0:3], vader_scores_avg)
-    generate_bar_plot(blob_models, blob_model_names,
-                      scoring_methods[0:3], blob_scores_avg)
+    # print("Generating bar plots")
+    # all_models = [model_vc_vader, model_ab_vader, model_vc_blob, model_ab_blob]
+    # all_model_names = ["model_vc_vader", "model_ab_vader", "model_vc_blob", "model_ab_blob"]
+    #
+    # w = 0.2
+    # bottom = 0.6
+    # top = 1
+    #
+    # scores_avg = {"model_vc_vader": vader_scores_avg['model_vc_vader'],
+    #               "model_ab_vader": vader_scores_avg['model_ab_vader'],
+    #               "model_vc_blob": blob_scores_avg['model_vc_blob'],
+    #               "model_ab_blob": blob_scores_avg['model_ab_blob']}
+    #
+    # x = []
+    # for k in range(len(all_models)):
+    #     x.append(all_model_names[k].replace("model_", ""))
+    #
+    # x_axis = np.arange(len(x))
+    # offset = -(((len(scoring_methods[0:3]) - 1) * w) / 2)
+    #
+    # method_scores = {}
+    #
+    # for method in scoring_methods[0:3]:
+    #     method_scores[method] = []
+    #
+    # for model in scores_avg:
+    #     for method in scoring_methods[0:3]:
+    #         method_scores[method].append(scores_avg[model][method])
+    #
+    # count = 0
+    # colors = ['lightseagreen', 'mediumorchid', 'steelblue']
+    # for method in scoring_methods[0:3]:
+    #     plt.bar(x_axis + offset + (count * w),
+    #             method_scores[method], w, color=colors[count], label=method)
+    #     count += 1
+    # plt.ylim(bottom, top)
+    # plt.xticks(x_axis, x)
+    # plt.xlabel("Models")
+    # plt.ylabel("Performance")
+    # plt.title("Scores for each model")
+    # plt.legend(loc='best')
+    # plt.tight_layout()
+    # plt.savefig("./plots/bar_plot.png")
+
+    # generate_bar_plot(all_models, all_model_names,
+    #                   scoring_methods[0:3], vader_scores_avg)
+
+    # generate_bar_plot(blob_models, blob_model_names,
+    #                   scoring_methods[0:3], blob_scores_avg, "blob")
 
     print("Printing scores to vader_scores_avg.csv")
     vader_scores_avg_df = pd.DataFrame(vader_scores_avg)
@@ -685,9 +735,10 @@ def main():
     # model_knn = pickle.load(open("./models/model_knn.pkl", "rb"))
     # model_ab = pickle.load(open("./models/model_ab.pkl", "rb"))
     # model_vc = pickle.load(open("./models/model_vc.pkl", "rb"))
-    model_mlp_vader = pickle.load(open("./models/model_mlp_blob.pkl", "rb"))
+    # model_mlp_vader = pickle.load(open("./models/model_mlp_vader.pkl", "rb"))
+    model_ab_vader = pickle.load(open("./models/model_ab_vader.pkl", "rb"))
 
-    final_model = model_mlp_vader
+    final_model = model_ab_vader
 
     ### Predictions ###
     print("Running predictions")

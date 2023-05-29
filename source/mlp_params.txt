@@ -1,2 +1,0 @@
-MLP Best Params for VADER:{'alpha': 1e-09, 'hidden_layer_sizes': (7, 5), 'max_iter': 10000, 'solver': 'adam'}
-MLP Best Params for blob:{'alpha': 1e-09, 'hidden_layer_sizes': (7, 5), 'max_iter': 10000, 'solver': 'adam'}
